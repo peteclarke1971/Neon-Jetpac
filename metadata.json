@@ -1,0 +1,8 @@
+{
+  "name": "Neon Jetpac",
+  "description": "A modern neon-vector reimagining of the classic ZX Spectrum game JETPAC.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
