@@ -4,6 +4,11 @@ let musicOsc: OscillatorNode | null = null;
 let musicInterval: any = null;
 let soundEnabled = true;
 
+const getVolumeFactor = (): number => {
+  const v = (window as any).__soundVolume;
+  return v !== undefined ? v : 1.0;
+};
+
 const playTone = (freq: number, type: OscillatorType, duration: number, vol = 0.1, slideFreq?: number) => {
   if (!soundEnabled) return;
   if (audioCtx.state === 'suspended') {
@@ -19,8 +24,8 @@ const playTone = (freq: number, type: OscillatorType, duration: number, vol = 0.
     osc.frequency.exponentialRampToValueAtTime(slideFreq, audioCtx.currentTime + duration);
   }
 
-  gain.gain.setValueAtTime(vol, audioCtx.currentTime);
-  gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + duration);
+  gain.gain.setValueAtTime(vol * getVolumeFactor(), audioCtx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.01 * getVolumeFactor(), audioCtx.currentTime + duration);
   
   osc.connect(gain);
   gain.connect(audioCtx.destination);
@@ -41,6 +46,10 @@ export const audio = {
     playTone(800, 'square', 0.1, 0.1, 200);
   },
 
+  playJump: () => {
+    playTone(250, 'triangle', 0.15, 0.15, 600);
+  },
+
   playExplosion: () => {
     if (!soundEnabled) return;
     const dur = 0.3;
@@ -57,8 +66,8 @@ export const audio = {
     filter.frequency.setValueAtTime(1000, audioCtx.currentTime);
     filter.frequency.linearRampToValueAtTime(100, audioCtx.currentTime + dur);
 
-    gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + dur);
+    gain.gain.setValueAtTime(0.3 * getVolumeFactor(), audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01 * getVolumeFactor(), audioCtx.currentTime + dur);
     
     osc.connect(filter);
     filter.connect(gain);
@@ -98,8 +107,8 @@ export const audio = {
     bqFilter.frequency.exponentialRampToValueAtTime(1000, audioCtx.currentTime + dur);
 
     rumbleGain.gain.setValueAtTime(0, audioCtx.currentTime);
-    rumbleGain.gain.linearRampToValueAtTime(0.8, audioCtx.currentTime + 0.5);
-    rumbleGain.gain.linearRampToValueAtTime(0.01, audioCtx.currentTime + dur);
+    rumbleGain.gain.linearRampToValueAtTime(0.8 * getVolumeFactor(), audioCtx.currentTime + 0.5);
+    rumbleGain.gain.linearRampToValueAtTime(0.01 * getVolumeFactor(), audioCtx.currentTime + dur);
     
     rumbleOsc.connect(bqFilter);
     bqFilter.connect(rumbleGain);
@@ -117,8 +126,8 @@ export const audio = {
     whineOsc.frequency.exponentialRampToValueAtTime(1200, audioCtx.currentTime + dur);
     
     whineGain.gain.setValueAtTime(0, audioCtx.currentTime);
-    whineGain.gain.linearRampToValueAtTime(0.3, audioCtx.currentTime + 1.0);
-    whineGain.gain.linearRampToValueAtTime(0.01, audioCtx.currentTime + dur);
+    whineGain.gain.linearRampToValueAtTime(0.3 * getVolumeFactor(), audioCtx.currentTime + 1.0);
+    whineGain.gain.linearRampToValueAtTime(0.01 * getVolumeFactor(), audioCtx.currentTime + dur);
     
     whineOsc.connect(whineGain);
     whineGain.connect(audioCtx.destination);
@@ -141,7 +150,7 @@ export const audio = {
     thrustOsc.frequency.value = 60;
     thrustGain = audioCtx.createGain();
     thrustGain.gain.setValueAtTime(0, audioCtx.currentTime);
-    thrustGain.gain.linearRampToValueAtTime(0.15, audioCtx.currentTime + 0.1);
+    thrustGain.gain.linearRampToValueAtTime(0.15 * getVolumeFactor(), audioCtx.currentTime + 0.1);
     
     const filter = audioCtx.createBiquadFilter();
     filter.type = 'lowpass';

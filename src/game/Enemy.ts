@@ -1,5 +1,6 @@
 import { Vector } from './Vector';
 import { GAME_WIDTH, GAME_HEIGHT, ENEMY_TYPES, NEON_COLORS } from './Constants';
+import { PlatformDef } from './StageProfiles';
 
 export class Enemy {
   pos: Vector;
@@ -12,23 +13,71 @@ export class Enemy {
   dirX = 1;
   trail: {x: number, y: number}[] = [];
 
-  constructor(typeDef: any) {
+  // Scavenger drone state
+  targetItem: any = null;
+  carryingItem: any = null;
+
+  // Phase wisp state
+  phaseSolid = true;
+
+  // Laser saucer state
+  laserCharge = 0;
+  laserFiring = false;
+  laserY = 0;
+
+  // Expansion state properties
+  shootTimer = 0;
+  shouldSpawnSpore = false;
+  swoopState = '';
+  mineTimer = 0;
+  shouldDropMine = false;
+  mimicState = '';
+  shouldSplit = false;
+
+  // Boss state
+  hp = 1;
+
+  constructor(typeDef: any, x?: number, y?: number, vx?: number, vy?: number) {
     if (typeof typeDef === 'number') {
       this.type = ENEMY_TYPES[typeDef % ENEMY_TYPES.length];
+    } else if (typeof typeDef === 'string') {
+      this.type = ENEMY_TYPES.find(e => e.name === typeDef) || ENEMY_TYPES[0];
     } else {
       this.type = typeDef;
     }
     
+    if (!this.type) {
+      this.type = ENEMY_TYPES[0];
+    }
+    
+    // Boss setup
+    if (this.type.name === 'boss_leech') {
+      this.hp = 50;
+      this.width = 60;
+      this.height = 60;
+    } else if (this.type.name === 'boss_eater') {
+      this.hp = 100;
+      this.width = 100;
+      this.height = 100;
+    }
+    
     this.dirX = Math.random() > 0.5 ? 1 : -1;
-    let startX = this.dirX === 1 ? -40 : GAME_WIDTH + 40;
-    let startY = (Math.random() * (GAME_HEIGHT - 100)) + 20;
+    let startX = x !== undefined ? x : (this.dirX === 1 ? -40 : GAME_WIDTH + 40);
+    let startY = y !== undefined ? y : ((Math.random() * (GAME_HEIGHT - 100)) + 20);
+    
+    // Ground-sweep logic to prevent safe standing zones on the bottom platform
+    if (this.type.name === 'meteor' || this.type.name === 'classic_asteroid' || this.type.name === 'split_meteor') {
+      if (Math.random() < 0.35) {
+        startY = GAME_HEIGHT - 52 - Math.random() * 6; // y: [542, 548] - safely clears floor y=580 while colliding with player
+      }
+    }
     
     this.pos = new Vector(startX, startY);
-    this.vel = new Vector(this.type.speed * this.dirX, 0);
+    this.vel = new Vector(vx !== undefined ? vx : (this.type.speed * this.dirX), vy !== undefined ? vy : 0);
     this.t = Math.random() * 1000;
   }
 
-  update(player: any, platforms: number[][]) {
+  update(player: any, platforms: PlatformDef[], items: any[], rocketBase?: { x: number, y: number }) {
     this.t += 0.05;
     
     this.trail.push({x: this.pos.x, y: this.pos.y});
@@ -40,7 +89,10 @@ export class Enemy {
     let checkPlatforms = false;
     let bouncePlatforms = false;
 
-    if (this.type.name === 'meteor' || this.type.name === 'classic_asteroid' || this.type.name === 'classic_dart') {
+    if (this.type.name === 'meteor' || this.type.name === 'classic_asteroid' || this.type.name === 'classic_dart' || this.type.name === 'split_meteor' || this.type.name === 'split_meteor_shard') {
+      if (this.type.name === 'split_meteor' && this.vel.y === 0) {
+        this.vel.y = this.type.speed * (Math.random() > 0.5 ? 1 : -1);
+      }
       this.pos.add(this.vel);
       checkPlatforms = true;
     } else if (this.type.name === 'classic_fuzzball' || this.type.name === 'classic_cross') {
@@ -51,45 +103,245 @@ export class Enemy {
       }
       this.pos.add(this.vel);
       bouncePlatforms = true;
-    } else if (this.type.name === 'classic_bubble') {
-      this.vel.y = Math.sin(this.t) * 1.5;
+    } else if (this.type.name === 'classic_bubble' || this.type.name === 'saucer' || this.type.name === 'classic_saucer') {
+      this.vel.y = Math.sin(this.t) * 2;
       this.pos.add(this.vel);
-      bouncePlatforms = true; // gentle bounce
+      if (this.type.name === 'classic_bubble') bouncePlatforms = true;
     } else if (this.type.name === 'classic_fighter') {
       if (this.t < 2) {
-        // hover briefly, align to player height
         let targetY = player.pos.y;
         if (this.pos.y < targetY) this.pos.y += 1;
         if (this.pos.y > targetY) this.pos.y -= 1;
       } else {
-        // attack
         this.pos.add(this.vel);
         checkPlatforms = true;
       }
-    } else if (this.type.name === 'saucer' || this.type.name === 'classic_saucer') {
-      this.vel.y = Math.sin(this.t) * 2;
-      this.pos.add(this.vel);
     } else if (this.type.name === 'spinner') {
       this.vel.y = Math.cos(this.t * 2) * 3;
       this.pos.add(this.vel);
     } else if (this.type.name === 'hunter') {
       this.vel.y = Math.sin(this.t) * 1.5 + Math.cos(this.t * 0.5);
       this.pos.add(this.vel);
-    } else if (this.type.name === 'classic_blob') {
-      // Swarm toward player
+    } else if (this.type.name === 'classic_blob' || this.type.name === 'gravity_jelly' || this.type.name === 'gravityJelly') {
       this.pos.add(this.vel);
       if (this.pos.y < player.pos.y) this.pos.y += 0.5;
       if (this.pos.y > player.pos.y) this.pos.y -= 0.5;
       bouncePlatforms = true;
+
+      // Gravity jelly affects items specifically
+      if (this.type.name === 'gravity_jelly' || this.type.name === 'gravityJelly') {
+         for (const item of items) {
+           if (!item.carried && !item.fallingToRocket) {
+              const dx = this.pos.x - item.pos.x;
+              const dy = this.pos.y - item.pos.y;
+              const dist = Math.sqrt(dx*dx + dy*dy);
+              if (dist < 150) {
+                 item.vel.x += (dx / dist) * 0.5;
+                 item.vel.y += (dy / dist) * 0.5;
+              }
+           }
+         }
+      }
+    } else if (this.type.name === 'phase_wisp') {
+      this.vel.y = Math.sin(this.t * 1.5) * 2;
+      this.pos.add(this.vel);
+      const phaseCycle = Math.sin(this.t * 2);
+      this.phaseSolid = phaseCycle > 0;
+    } else if (this.type.name === 'laser_saucer') {
+      if (!this.laserFiring && this.laserCharge === 0) {
+        this.vel.y = Math.sin(this.t) * 1.5;
+        this.pos.add(this.vel);
+        if (Math.abs(this.pos.x - GAME_WIDTH / 2) < 200 && Math.random() < 0.01) {
+          this.laserCharge = 1;
+        }
+      } else if (this.laserCharge > 0) {
+        this.vel.x = 0; // stop
+        this.vel.y = 0;
+        this.laserCharge += 1;
+        if (this.laserCharge > 60) {
+          this.laserCharge = 0;
+          this.laserFiring = true;
+          this.laserY = this.pos.y + this.height/2;
+          
+          // Laser hit detect immediately for this frame
+          if (player.pos.y + player.height > this.laserY - 10 && player.pos.y < this.laserY + 10) {
+            // we let GameEngine handle death, but we could trigger it. For simplicity, 
+            // the main loop checks enemy collisions but not this continuous beam.
+            // We'd better just make the saucer highly lethal, or tell GameEngine somehow.
+          }
+        }
+      } else if (this.laserFiring) {
+        this.laserCharge -= 1; // using as timer 0 -> -30
+        if (this.laserCharge < -30) {
+          this.laserFiring = false;
+          this.laserCharge = 0;
+          this.vel.x = this.type.speed * this.dirX;
+        }
+      }
+    } else if (this.type.name === 'mine_layer' || this.type.name === 'mineLayer') {
+       this.vel.y = Math.sin(this.t) * 1;
+       this.pos.add(this.vel);
+       if (!this.mineTimer) this.mineTimer = 0;
+       this.mineTimer++;
+       if (this.mineTimer >= 180) {
+          this.mineTimer = 0;
+          this.shouldDropMine = true;
+       }
+    } else if (this.type.name === 'fuelThief') {
+       if (this.carryingItem) {
+          // Escape
+          this.pos.y -= 1.5;
+          this.carryingItem.pos.x = this.pos.x;
+          this.carryingItem.pos.y = this.pos.y + 30; // hang below
+          if (this.pos.y < -40) {
+             this.dead = true;
+          }
+       } else if (this.targetItem && !this.targetItem.carried && !this.targetItem.collected && this.targetItem.kind === 'fuel') {
+          // Chase fuel
+          const dx = this.targetItem.pos.x - this.pos.x;
+          const dy = this.targetItem.pos.y - this.pos.y;
+          const dist = Math.sqrt(dx*dx + dy*dy);
+          if (dist < 30) {
+             this.carryingItem = this.targetItem;
+             this.targetItem.carried = true;
+          } else {
+             this.pos.x += (dx / dist) * (this.type.speed || 1.5);
+             this.pos.y += (dy / dist) * (this.type.speed || 1.5);
+          }
+       } else {
+          const fuelItem = items.find(i => i.kind === 'fuel' && !i.carried && !i.collected && !i.fallingToRocket);
+          if (fuelItem) {
+             this.targetItem = fuelItem;
+          } else {
+             this.pos.add(this.vel);
+          }
+       }
+    } else if (this.type.name === 'turretOrb') {
+       this.vel.x = 0;
+       this.vel.y = 0;
+       if (!this.shootTimer) this.shootTimer = 0;
+       this.shootTimer++;
+       if (this.shootTimer >= 150) {
+          this.shootTimer = 0;
+          this.shouldSpawnSpore = true;
+       }
+    } else if (this.type.name === 'swooper') {
+       if (!this.swoopState) this.swoopState = 'hover';
+       if (this.swoopState === 'hover') {
+          this.vel.y = 0;
+          this.pos.add(this.vel);
+          this.pos.y = 30 + Math.sin(this.t) * 10;
+          if (Math.abs(this.pos.x - player.pos.x) < 80 && player.pos.y > this.pos.y) {
+             this.swoopState = 'swoop';
+             this.vel.y = 5;
+             this.vel.x = (player.pos.x > this.pos.x ? 1 : -1) * 3;
+          }
+       } else if (this.swoopState === 'swoop') {
+          this.pos.add(this.vel);
+          this.vel.y += 0.1;
+          if (this.pos.y > GAME_HEIGHT - 80 || this.vel.y > 7) {
+             this.swoopState = 'recover';
+             this.vel.y = -3;
+          }
+       } else if (this.swoopState === 'recover') {
+          this.pos.add(this.vel);
+          this.vel.x = this.dirX * (this.type.speed || 2);
+          if (this.pos.y < 50) {
+             this.swoopState = 'hover';
+             this.vel.y = 0;
+          }
+       }
+    } else if (this.type.name === 'mimicFuel') {
+       if (!this.mimicState) this.mimicState = 'disguised';
+       const dx = player.pos.x - this.pos.x;
+       const dy = player.pos.y - this.pos.y;
+       const dist = Math.sqrt(dx*dx + dy*dy);
+       if (this.mimicState === 'disguised') {
+          this.vel.x = 0;
+          this.vel.y = 0;
+          if (dist < 100) {
+             this.mimicState = 'aggro';
+          }
+       } else {
+          this.vel.x = (dx / dist) * 3;
+          this.vel.y = (dy / dist) * 3;
+          this.pos.add(this.vel);
+       }
+    } else if (this.type.name === 'splitter') {
+       this.pos.add(this.vel);
+       bouncePlatforms = true;
+    } else if (this.type.name === 'scavenger') {
+       if (this.carryingItem) {
+          // Escape
+          this.pos.y -= 2;
+          this.carryingItem.pos.x = this.pos.x;
+          this.carryingItem.pos.y = this.pos.y + 30; // hang below
+       } else if (this.targetItem && !this.targetItem.carried && !this.targetItem.collected) {
+          // Chase
+          const dx = this.targetItem.pos.x - this.pos.x;
+          const dy = this.targetItem.pos.y - this.pos.y;
+          const dist = Math.sqrt(dx*dx + dy*dy);
+          if (dist < 30) {
+             this.carryingItem = this.targetItem;
+             this.targetItem.carried = true;
+          } else {
+             this.pos.x += (dx / dist) * this.type.speed;
+             this.pos.y += (dy / dist) * this.type.speed;
+          }
+       } else {
+          // Look for item
+          const validItems = items.filter(i => !i.carried && !i.collected && !i.fallingToRocket);
+          if (validItems.length > 0) {
+             this.targetItem = validItems[Math.floor(Math.random() * validItems.length)];
+          } else {
+             this.pos.add(this.vel);
+          }
+       }
+    } else if (this.type.name === 'saboteur') {
+       // Aims for Rocket Base
+       const targetX = rocketBase?.x ?? 550; // ROCKET_BASE_X
+       const targetY = rocketBase?.y ?? (GAME_HEIGHT - 20); // ROCKET_BASE_Y
+       
+       const dx = targetX - this.pos.x;
+       const dy = targetY - this.pos.y;
+       const dist = Math.sqrt(dx*dx + dy*dy);
+       if (dist > 50) {
+          this.pos.x += (dx / dist) * this.type.speed;
+          this.pos.y += (dy / dist) * this.type.speed;
+       } else {
+          // Hover and drain
+          this.pos.y += Math.sin(this.t * 3) * 0.5;
+       }
+    } else if (this.type.name === 'spore') {
+       this.pos.add(this.vel);
+       this.vel.y += 0.05; // gravity drift
+       if (this.vel.y > 3) this.vel.y = 3;
+    } else if (this.type.name === 'boss_leech') {
+       // Slow wavy hover near rocket
+       this.vel.y = Math.sin(this.t) * 1.5;
+       if (this.pos.x < 400) this.pos.x += 1;
+       this.pos.add(this.vel);
+       // It bounces vertically bounds though
+    } else if (this.type.name === 'boss_eater') {
+       // Moves up and down actively seeking player vertically but stays on right
+       if (this.pos.x > 600) this.pos.x -= 1;
+       else if (this.pos.x < 500) this.pos.x += 1;
+       const dy = player.pos.y - this.pos.y;
+       this.pos.y += dy > 0 ? 0.5 : -0.5;
+       this.pos.add(this.vel);
+    } else {
+       this.pos.add(this.vel);
     }
 
     // screen wrap horizontally
-    if (this.vel.x > 0 && this.pos.x > GAME_WIDTH + 50) this.pos.x = -50;
-    if (this.vel.x < 0 && this.pos.x < -50) this.pos.x = GAME_WIDTH + 50;
+    if (this.type.name !== 'boss_leech' && this.type.name !== 'boss_eater') {
+      if (this.vel.x > 0 && this.pos.x > GAME_WIDTH + 50) this.pos.x = -50;
+      if (this.vel.x < 0 && this.pos.x < -50) this.pos.x = GAME_WIDTH + 50;
+    }
 
     // bounce vertical bounds
     if (this.pos.y < 0 || this.pos.y > GAME_HEIGHT - 30) {
-      if (this.type.name === 'classic_dart' || this.type.name === 'classic_asteroid' || this.type.name === 'classic_fighter') {
+      if (this.type.name === 'classic_dart' || this.type.name === 'classic_asteroid' || this.type.name === 'classic_fighter' || this.type.name === 'split_meteor' || this.type.name === 'split_meteor_shard' || (this.type.name === 'scavenger' && this.carryingItem)) {
         this.dead = true;
       } else {
         this.vel.y *= -1;
@@ -126,6 +378,12 @@ export class Enemy {
     
     ctx.save();
     
+    if (this.type.name === 'phase_wisp' && !this.phaseSolid) {
+       ctx.globalAlpha = 0.3; // Much dimmer
+    } else {
+       ctx.globalAlpha = 1.0;
+    }
+    
     // Draw motion trail
     if (this.trail.length > 0) {
       ctx.beginPath();
@@ -135,8 +393,60 @@ export class Enemy {
       }
       ctx.lineWidth = 4;
       ctx.strokeStyle = this.type.color;
-      ctx.globalAlpha = 0.3;
+      ctx.globalAlpha = this.type.name === 'phase_wisp' && !this.phaseSolid ? 0.1 : 0.3;
       ctx.lineCap = 'round';
+      ctx.stroke();
+      ctx.globalAlpha = 1.0;
+    }
+
+    // Laser beam
+    if (this.type.name === 'laser_saucer') {
+      if (this.laserCharge > 0) {
+         // Telegraph line
+         ctx.beginPath();
+         ctx.moveTo(this.pos.x + this.width/2, this.pos.y + this.height/2);
+         ctx.lineTo(this.dirX === 1 ? GAME_WIDTH : 0, this.pos.y + this.height/2);
+         ctx.strokeStyle = NEON_COLORS.RED;
+         ctx.lineWidth = 1;
+         ctx.globalAlpha = this.laserCharge / 60;
+         ctx.stroke();
+         ctx.globalAlpha = 1.0;
+      } else if (this.laserFiring) {
+         // Firing beam
+         ctx.beginPath();
+         ctx.moveTo(this.pos.x + this.width/2, this.pos.y + this.height/2);
+         // Laser shoots all the way across
+         ctx.lineTo(this.dirX === 1 ? GAME_WIDTH : 0, this.pos.y + this.height/2);
+         ctx.strokeStyle = NEON_COLORS.RED;
+         ctx.lineWidth = 15;
+         ctx.shadowBlur = 20;
+         ctx.shadowColor = NEON_COLORS.RED;
+         ctx.stroke();
+         ctx.lineWidth = 5;
+         ctx.strokeStyle = '#ffffff';
+         ctx.stroke();
+         ctx.shadowBlur = 0;
+      }
+    }
+
+    if (this.type.name === 'scavenger' && this.carryingItem) {
+      // Glow tether
+      ctx.beginPath();
+      ctx.moveTo(this.pos.x + this.width/2, this.pos.y + this.height/2);
+      ctx.lineTo(this.carryingItem.pos.x + 12, this.carryingItem.pos.y + 12);
+      ctx.strokeStyle = NEON_COLORS.CYAN;
+      ctx.lineWidth = 2;
+      ctx.setLineDash([5, 5]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    if (this.type.name === 'gravity_jelly') {
+      ctx.beginPath();
+      ctx.arc(this.pos.x + this.width/2, this.pos.y + this.height/2, 100, 0, Math.PI * 2);
+      ctx.strokeStyle = '#33ffaa';
+      ctx.globalAlpha = 0.1 + Math.sin(this.t * 3) * 0.05;
+      ctx.lineWidth = 2;
       ctx.stroke();
       ctx.globalAlpha = 1.0;
     }
@@ -152,6 +462,12 @@ export class Enemy {
     
     const facing = this.vel.x < 0 ? -1 : 1;
     ctx.scale(facing, 1);
+
+    // Apply elegant organic breathing / hover wobbling based on unit speed
+    const oscSpeed = this.type.name === 'hunter' ? 12 : this.type.name === 'gravity_jelly' ? 4.5 : 6;
+    const hoverScaleX = 1 + Math.sin(this.t * oscSpeed) * 0.055;
+    const hoverScaleY = 1 + Math.cos(this.t * oscSpeed) * 0.055;
+    ctx.scale(hoverScaleX, hoverScaleY);
     
     if (this.type.name === 'spinner') {
       ctx.rotate(this.t * 5);
@@ -159,17 +475,25 @@ export class Enemy {
     
     ctx.beginPath();
     
-    if (this.type.name === 'meteor' || this.type.name === 'classic_asteroid') {
+    if (this.type.name === 'meteor' || this.type.name === 'classic_asteroid' || this.type.name === 'split_meteor' || this.type.name === 'split_meteor_shard') {
+      const scale = this.type.name === 'split_meteor_shard' ? 0.6 : 1;
+      ctx.scale(scale, scale);
       ctx.arc(0, 0, 12, 0, Math.PI * 2);
       ctx.fill();
       ctx.moveTo(-12, -6); ctx.lineTo(12, 6);
       ctx.moveTo(-6, 12); ctx.lineTo(6, -12);
-    } else if (this.type.name === 'saucer' || this.type.name === 'classic_saucer') {
+      if (this.type.name === 'split_meteor') {
+         ctx.moveTo(0, -12); ctx.lineTo(0, 12); // Extra crack line to distinguish
+      }
+    } else if (this.type.name === 'saucer' || this.type.name === 'classic_saucer' || this.type.name === 'laser_saucer') {
       ctx.ellipse(0, 0, 18, 8, 0, 0, Math.PI * 2);
       ctx.fill();
       ctx.beginPath();
       ctx.arc(0, -8, 8, Math.PI, 0);
       ctx.fill();
+      if (this.type.name === 'laser_saucer') {
+         ctx.arc(0, 0, 4, 0, Math.PI * 2); // core
+      }
     } else if (this.type.name === 'spinner') {
       ctx.rect(-10, -10, 20, 20);
       ctx.fill();
@@ -220,6 +544,150 @@ export class Enemy {
       ctx.fill();
       ctx.moveTo(-r, 0); ctx.lineTo(r, 0);
       ctx.moveTo(0, -r); ctx.lineTo(0, r);
+    } else if (this.type.name === 'scavenger') {
+       ctx.moveTo(0, 12);
+       ctx.lineTo(-12, -8);
+       ctx.lineTo(12, -8);
+       ctx.closePath();
+       ctx.fill();
+       ctx.moveTo(0, 0); ctx.arc(0, 0, 4, 0, Math.PI*2); // eye
+    } else if (this.type.name === 'saboteur') {
+       ctx.rect(-8, -8, 16, 16);
+       ctx.fill();
+       ctx.moveTo(-14, -14); ctx.lineTo(14, 14);
+       ctx.moveTo(-14, 14); ctx.lineTo(14, -14);
+    } else if (this.type.name === 'phase_wisp') {
+       ctx.beginPath();
+       for(let i=0; i<6; i++) {
+          const a = (i/6)*Math.PI*2 + this.t;
+          ctx.lineTo(Math.cos(a)*14, Math.sin(a)*14);
+       }
+       ctx.closePath();
+       ctx.fill();
+    } else if (this.type.name === 'gravity_jelly' || this.type.name === 'gravityJelly') {
+       ctx.arc(0, -4, 10, Math.PI, 0);
+       ctx.lineTo(10, 8);
+       ctx.lineTo(5, 4);
+       ctx.lineTo(0, 12);
+       ctx.lineTo(-5, 4);
+       ctx.lineTo(-10, 8);
+       ctx.closePath();
+       ctx.fill();
+    } else if (this.type.name === 'mine_layer' || this.type.name === 'mineLayer') {
+       ctx.moveTo(-10, -10);
+       ctx.lineTo(10, -10);
+       ctx.lineTo(0, 15);
+       ctx.closePath();
+       ctx.fill();
+    } else if (this.type.name === 'fuelThief') {
+       ctx.arc(0, 0, 10, 0, Math.PI * 2);
+       ctx.fill();
+       ctx.beginPath();
+       ctx.moveTo(-10, 4);
+       ctx.lineTo(-5, 12);
+       ctx.lineTo(5, 12);
+       ctx.lineTo(10, 4);
+       ctx.stroke();
+       ctx.beginPath();
+       ctx.arc(0, -2, 2, 0, Math.PI * 2);
+       ctx.stroke();
+    } else if (this.type.name === 'turretOrb') {
+       ctx.arc(0, 0, 12, 0, Math.PI * 2);
+       ctx.stroke();
+       ctx.beginPath();
+       ctx.arc(0, 0, 6, 0, Math.PI * 2);
+       ctx.fill();
+       ctx.beginPath();
+       ctx.moveTo(0, 0);
+       ctx.lineTo(0, 14);
+       ctx.stroke();
+    } else if (this.type.name === 'swooper') {
+       ctx.moveTo(14, 0);
+       ctx.lineTo(-10, 14);
+       ctx.lineTo(-4, 0);
+       ctx.lineTo(-10, -14);
+       ctx.closePath();
+       ctx.fill();
+       ctx.beginPath();
+       ctx.moveTo(-4, 0);
+       ctx.lineTo(-16, 0);
+       ctx.stroke();
+    } else if (this.type.name === 'mimicFuel') {
+       if (this.mimicState === 'disguised') {
+          const prevShadow = ctx.shadowColor;
+           ctx.shadowColor = NEON_COLORS.MAGENTA;
+          ctx.beginPath();
+          ctx.rect(-10, -12, 20, 24);
+          ctx.fill();
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.rect(-4, -16, 8, 4);
+          ctx.stroke();
+          ctx.shadowColor = prevShadow;
+       } else {
+          ctx.arc(0, 0, 12, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.moveTo(-8, 4); ctx.lineTo(-4, 12); ctx.lineTo(0, 4);
+          ctx.moveTo(0, 4); ctx.lineTo(4, 12); ctx.lineTo(8, 4);
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.fillStyle = '#ffaa00';
+          ctx.arc(-4, -4, 2, 0, Math.PI*2);
+          ctx.arc(4, -4, 2, 0, Math.PI*2);
+          ctx.fill();
+          ctx.fillStyle = '#050510';
+       }
+    } else if (this.type.name === 'splitter') {
+       ctx.moveTo(0, -14);
+       ctx.lineTo(12, 0);
+       ctx.lineTo(0, 14);
+       ctx.lineTo(-12, 0);
+       ctx.closePath();
+       ctx.fill();
+       ctx.moveTo(0, -14);
+       ctx.lineTo(0, 14);
+    } else if (this.type.name === 'spore') {
+       ctx.arc(0, 0, 6, 0, Math.PI * 2);
+       ctx.fill();
+       ctx.beginPath();
+       ctx.arc(0, 0, 2, 0, Math.PI * 2);
+       // core
+       const prevStyle = ctx.fillStyle;
+       ctx.fillStyle = NEON_COLORS.CYAN;
+       ctx.fill();
+       ctx.fillStyle = prevStyle;
+    } else if (this.type.name === 'boss_leech') {
+       ctx.moveTo(-30, -30);
+       ctx.lineTo(30, -10);
+       ctx.lineTo(30, 10);
+       ctx.lineTo(-30, 30);
+       ctx.closePath();
+       ctx.fill();
+       ctx.beginPath();
+       ctx.arc(0, 0, 10, 0, Math.PI * 2);
+       ctx.stroke();
+       if (this.hp) {
+          ctx.font = '7px monospace';
+          ctx.fillStyle = '#fff';
+          ctx.fillText(`HP:${this.hp}`, -15, -40);
+       }
+    } else if (this.type.name === 'boss_eater') {
+       ctx.arc(0, 0, 40 + Math.sin(this.t * 5) * 5, 0, Math.PI * 2);
+       ctx.fill();
+       ctx.beginPath();
+       ctx.moveTo(0, -50);
+       ctx.lineTo(-20, 0);
+       ctx.lineTo(0, 50);
+       ctx.lineTo(20, 0);
+       ctx.closePath();
+       ctx.stroke();
+       if (this.hp) {
+          ctx.font = '8px monospace';
+          ctx.fillStyle = '#fff';
+          ctx.fillText(`HP:${this.hp}`, -20, -60);
+       }
+    } else {
+       ctx.rect(-10, -10, 20, 20);
     }
     
     ctx.stroke();

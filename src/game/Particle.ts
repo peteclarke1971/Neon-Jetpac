@@ -8,10 +8,12 @@ export class Particle {
   color: string;
   size: number;
   decay: number;
-  type: 'spark' | 'smoke' | 'text' | 'thrust' = 'spark';
+  type: 'spark' | 'smoke' | 'text' | 'thrust' | 'ring' | 'shard' = 'spark';
   text?: string;
+  rotation?: number;
+  rotSpeed?: number;
 
-  constructor(x: number, y: number, color: string, speedModifier: number = 1, text?: string, isThrust: boolean = false) {
+  constructor(x: number, y: number, color: string, speedModifier: number = 1, text?: string, isThrust: boolean = false, overrideType?: 'ring' | 'shard') {
     this.pos = new Vector(x, y);
     
     if (text) {
@@ -23,6 +25,26 @@ export class Particle {
       this.color = color;
       this.size = 20; // font size
       this.decay = 1;
+    } else if (overrideType === 'ring') {
+      this.type = 'ring';
+      this.vel = new Vector(0, 0);
+      this.maxLife = 20;
+      this.life = this.maxLife;
+      this.color = color;
+      this.size = 5; 
+      this.decay = 1;
+    } else if (overrideType === 'shard') {
+      this.type = 'shard';
+      const angle = Math.random() * Math.PI * 2;
+      const speed = (Math.random() * 6 + 2.0) * speedModifier;
+      this.vel = new Vector(Math.cos(angle) * speed, Math.sin(angle) * speed);
+      this.maxLife = Math.random() * 30 + 20;
+      this.life = this.maxLife;
+      this.color = color;
+      this.size = Math.random() * 6 + 4;
+      this.decay = Math.random() * 0.8 + 0.5;
+      this.rotation = Math.random() * Math.PI;
+      this.rotSpeed = (Math.random() - 0.5) * 0.5;
     } else if (isThrust) {
       this.type = 'thrust';
       this.vel = new Vector((Math.random() - 0.5) * 2, Math.random() * 5 + 3);
@@ -49,6 +71,20 @@ export class Particle {
       this.pos.add(this.vel);
       this.life -= this.decay;
       return;
+    }
+
+    if (this.type === 'ring') {
+       this.size += 4;
+       this.life -= this.decay;
+       return;
+    }
+    
+    if (this.type === 'shard') {
+       this.pos.add(this.vel);
+       this.vel.y += 0.2; // gravity 
+       this.rotation! += this.rotSpeed!;
+       this.life -= this.decay;
+       return;
     }
 
     if (this.type === 'thrust') {
@@ -80,12 +116,44 @@ export class Particle {
     
     if (this.type === 'text') {
       ctx.fillStyle = this.color;
-      ctx.font = `bold ${this.size}px "JetBrains Mono", monospace`;
+      ctx.font = `bold ${this.size}px "Press Start 2P", monospace`;
       ctx.shadowBlur = 10;
       ctx.shadowColor = this.color;
       ctx.textAlign = 'center';
       ctx.fillText(this.text!, this.pos.x, this.pos.y);
       ctx.textAlign = 'left';
+    } else if (this.type === 'ring') {
+      ctx.strokeStyle = this.color;
+      ctx.lineWidth = 3;
+      ctx.shadowBlur = 15;
+      ctx.shadowColor = this.color;
+      ctx.beginPath();
+      ctx.arc(this.pos.x, this.pos.y, this.size, 0, Math.PI * 2);
+      ctx.stroke();
+      
+      // core
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 1;
+      ctx.shadowBlur = 0;
+      ctx.stroke();
+    } else if (this.type === 'shard') {
+      ctx.save();
+      ctx.translate(this.pos.x, this.pos.y);
+      ctx.rotate(this.rotation!);
+      ctx.fillStyle = this.color;
+      ctx.shadowBlur = 10;
+      ctx.shadowColor = this.color;
+      ctx.beginPath();
+      ctx.moveTo(0, -this.size);
+      ctx.lineTo(this.size/2, this.size);
+      ctx.lineTo(-this.size/2, this.size);
+      ctx.closePath();
+      ctx.fill();
+      
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.restore();
     } else if (this.type === 'spark') {
       // Line spark
       ctx.beginPath();

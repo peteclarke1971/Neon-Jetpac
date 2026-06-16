@@ -1,8 +1,9 @@
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700;800&family=Press+Start+2P&display=swap');
 @import "tailwindcss";
 
 @theme {
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  --font-spectrum: "Press Start 2P", system-ui, sans-serif;
 }
 
 body {
@@ -10,7 +11,7 @@ body {
   padding: 0;
   background-color: #000;
   color: #fff;
-  font-family: var(--font-mono);
+  font-family: var(--font-spectrum);
   overflow: hidden;
   touch-action: none;
 }
